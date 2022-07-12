@@ -1,7 +1,7 @@
 [features]
 seeds = false
 [programs.localnet]
-assignmentchecker = "Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS"
+assignmentchecker = "6syjPkpJf6gT6JCaXvWVDfKk4vv29s16F7FTWB2t4XP5"
 
 [registry]
 url = "https://anchor.projectserum.com"
