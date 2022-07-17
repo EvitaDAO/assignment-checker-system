@@ -277,12 +277,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
 
 [[package]]
-name = "assignmentchecker"
+name = "assignment_checker"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
  "borsh",
+ "course_manager",
 ]
 
 [[package]]
@@ -641,6 +642,13 @@ name = "constant_time_eq"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
+
+[[package]]
+name = "course_manager"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+]
 
 [[package]]
 name = "cpufeatures"
@@ -2020,8 +2028,9 @@ dependencies = [
 name = "program_client"
 version = "0.1.0"
 dependencies = [
- "assignmentchecker",
- "trdelnik-sandbox-client",
+ "assignment_checker",
+ "course_manager",
+ "trdelnik-client",
 ]
 
 [[package]]
@@ -3470,10 +3479,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "trdelnik-sandbox-client"
-version = "0.1.2"
+name = "trdelnik-client"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc38512d31fbd07018e371b76ed56c70fb7f27a22d2c3b2b1ecd5a7af621eb28"
+checksum = "b29a5818ca6b762e0dd88403d61488ea4e48a0c7d5970a86aa977b3767ddb17c"
 dependencies = [
  "anchor-client",
  "anyhow",
@@ -3491,6 +3500,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "solana-account-decoder",
  "solana-cli-output",
  "solana-sdk",
  "solana-transaction-status",
@@ -3506,9 +3516,9 @@ dependencies = [
 
 [[package]]
 name = "trdelnik-test"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8adb3589406511395a0dc8ac1594f693d6efcf6b4e8b646870dbb80f1a51a3a9"
+checksum = "bab22e18c7e223ccb6179258e0881115ed5f696f41dab2d1f753987b867a4297"
 dependencies = [
  "darling",
  "proc-macro2 1.0.40",
@@ -3521,11 +3531,12 @@ name = "trdelnik-tests"
 version = "0.1.0"
 dependencies = [
  "anchor-spl",
- "assignmentchecker",
+ "assignment_checker",
+ "course_manager",
  "fehler",
  "program_client",
  "rstest",
- "trdelnik-sandbox-client",
+ "trdelnik-client",
 ]
 
 [[package]]

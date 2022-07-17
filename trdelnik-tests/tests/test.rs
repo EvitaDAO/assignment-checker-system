@@ -1,8 +1,7 @@
-use anchor_spl::token;
-use assignmentchecker;
 use fehler::throws;
-use program_client::assignmentchecker_instruction;
-use trdelnik_client::{anchor_lang::Key, anyhow::Result, *};
+use program_client::assignment_checker_instruction;
+use program_client::course_manager_instruction;
+use trdelnik_client::{anyhow::Result, *};
 // @todo: do not forget to import your program crate (also in the ../Cargo.toml)
 
 // @todo: create and deploy your fixture
@@ -13,12 +12,31 @@ async fn init_fixture() -> Fixture {
     // Deploy
     f.deploy().await?;
     f.client
-        .create_account_rent_exempt(&f.course_authority, 64, &f.system_program.pubkey())
+        .airdrop(f.course_authority.pubkey(), 5_000_000)
         .await?;
-    // Create program derived course_account. It could be managed by some external course program.
-    f.course_account =
-        Pubkey::find_program_address(&[b"course", b"web2_to_web3"], &f.course_program.pubkey()).0;
-    // Assignment checker can mint course tokens on successful assignment checks
+
+    let (course_address, _) = Pubkey::find_program_address(
+        &[
+            course_manager::COURSE_AUTHORITY_SEED,
+            f.course_authority.pubkey().as_ref(),
+            course_manager::COURSE_ID_SEED,
+            &f.course_id,
+        ],
+        &f.course_program.pubkey(),
+    );
+    f.course_pda = course_address;
+    // create course account
+    course_manager_instruction::create_new_course(
+        &f.client,
+        f.course_id,
+        f.course_authority.pubkey(),
+        f.course_pda.clone(),
+        f.system_program,
+        [f.course_authority.clone()],
+    )
+    .await?;
+
+    // // Assignment checker can mint course tokens on successful assignment checks
     f.client
         .create_token_mint(&f.mint_keypair, f.course_authority.pubkey(), None, 0)
         .await?;
@@ -40,7 +58,23 @@ async fn init_fixture() -> Fixture {
 async fn test_happy_path(#[future] init_fixture: Result<Fixture>) {
     // @todo: add your happy path test scenario and the other test cases
     let f = init_fixture.await?;
-    assignmentchecker_instruction::create(
+    let course_pda = f.get_course_account().await?;
+    assert_eq!(course_pda.authority, f.course_authority.pubkey());
+
+    let batch_id: u16 = 1;
+    let assignment_id: u16 = 1;
+    let (assignment_checker, _) = Pubkey::find_program_address(
+        &[
+            assignment_checker::COURSE_ACCOUNT_SEED,
+            f.course_pda.as_ref(),
+            assignment_checker::BATCH_ID_SEED,
+            batch_id.to_be_bytes().as_ref(),
+            assignment_checker::ASSIGNMENT_ID_SEED,
+            assignment_id.to_be_bytes().as_ref(),
+        ],
+        &f.program.pubkey(),
+    );
+    assignment_checker_instruction::create(
         &f.client,
         1,
         1,
@@ -49,10 +83,11 @@ async fn test_happy_path(#[future] init_fixture: Result<Fixture>) {
         [0; 32],
         [1; 32],
         f.course_authority.pubkey().clone(),
-        // f.course_account,
-        // Pubkey::default(),
+        f.course_program.pubkey(),
+        f.course_pda,
+        assignment_checker,
         // f.mint_keypair.pubkey(),
-        // f.system_program.pubkey(),
+        f.system_program,
         [f.course_authority.clone()],
     )
     .await?;
@@ -62,10 +97,11 @@ async fn test_happy_path(#[future] init_fixture: Result<Fixture>) {
 struct Fixture {
     client: Client,
     program: Keypair,
-    system_program: Keypair,
+    system_program: Pubkey,
     course_program: Keypair,
     course_authority: Keypair,
-    course_account: Pubkey,
+    course_id: [u8; 16],
+    course_pda: Pubkey,
     // can be related to course_authority
     mint_keypair: Keypair,
     student_a: Keypair,
@@ -78,40 +114,33 @@ impl Fixture {
         Fixture {
             client: Client::new(system_keypair(0)),
             program: program_keypair(1),
-            system_program: system_keypair(1),
-            course_program: program_keypair(1),
+            system_program: anchor_lang::system_program::ID,
+            course_program: program_keypair(2),
             course_authority: keypair(0),
-            course_account: Pubkey::default(),
-            mint_keypair: keypair(1),
-            student_a: keypair(2),
+            course_id: *b"web2_to_web3____",
+            course_pda: Default::default(),
+            mint_keypair: keypair(2),
+            student_a: keypair(3),
             student_a_token_account: Pubkey::default(),
-            student_b: keypair(3),
+            student_b: keypair(4),
             student_b_token_account: Pubkey::default(),
         }
     }
 
     #[throws]
     async fn deploy(&mut self) {
-        self.deploy_by_name(&self.program.clone(), "assignmentchecker")
+        self.client
+            .deploy_by_name(&self.course_program, "course_manager")
+            .await?;
+        self.client
+            .deploy_by_name(&self.program, "assignment_checker")
             .await?;
     }
+
     #[throws]
-    pub async fn deploy_by_name(&self, program_keypair: &Keypair, program_name: &str) {
-        let reader = Reader::new();
-        let mut program_data = reader
-            .program_data(program_name)
-            .await
-            .expect("reading program data failed");
-
-        // TODO: This will fail on devnet where airdrops are limited to 1 SOL
+    async fn get_course_account(&self) -> course_manager::Course {
         self.client
-            .airdrop(self.client.payer().pubkey(), 5_000_000_000)
-            .await
-            .expect("airdropping for deployment failed");
-
-        self.client
-            .deploy(program_keypair.clone(), std::mem::take(&mut program_data))
-            .await
-            .expect("deploying program failed");
+            .account_data::<course_manager::Course>(self.course_pda)
+            .await?
     }
 }

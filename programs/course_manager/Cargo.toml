@@ -1,12 +1,12 @@
 [package]
-name = "assignmentchecker"
+name = "course_manager"
 version = "0.1.0"
 description = "Created with Anchor"
 edition = "2021"
 
 [lib]
 crate-type = ["cdylib", "lib"]
-name = "assignmentchecker"
+name = "course_manager"
 
 [features]
 no-entrypoint = []
@@ -15,10 +15,5 @@ no-log-ix-name = []
 cpi = ["no-entrypoint"]
 default = []
 
-[profile.release]
-overflow-checks = true
-
 [dependencies]
-anchor-lang = "0.24.2"
-anchor-spl = "0.24.2"
-borsh = "0.9"
+anchor-lang = "0.24.0"

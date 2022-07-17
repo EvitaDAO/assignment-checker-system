@@ -1,7 +1,8 @@
 [features]
 seeds = false
 [programs.localnet]
-assignmentchecker = "6syjPkpJf6gT6JCaXvWVDfKk4vv29s16F7FTWB2t4XP5"
+assignment_checker = "Po1RaS8BEDbNcn5oXsFryAeQ6Wn8fvmE111DJaKCgPC"
+course_manager = "Po2hjSPEQmN9e1YLiZwwL3tCkqMCo2wYyLqAkF7ZmQn"
 
 [registry]
 url = "https://anchor.projectserum.com"
