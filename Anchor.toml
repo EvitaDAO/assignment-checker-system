@@ -3,6 +3,7 @@ seeds = false
 [programs.localnet]
 assignment_checker = "Po1RaS8BEDbNcn5oXsFryAeQ6Wn8fvmE111DJaKCgPC"
 course_manager = "Po2hjSPEQmN9e1YLiZwwL3tCkqMCo2wYyLqAkF7ZmQn"
+course_batch_manager = "Po3YrSjzp5HM7VRFYszFM23LVJ58HHC9qoionaUgvRy"
 
 [registry]
 url = "https://anchor.projectserum.com"

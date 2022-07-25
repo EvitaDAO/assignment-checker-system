@@ -19,6 +19,19 @@ pub mod course_manager {
     }
 }
 
+pub fn course_canonical_pda(course_authority: Pubkey, course_id: &[u8; 16]) -> Pubkey {
+    Pubkey::find_program_address(
+        &[
+            COURSE_AUTHORITY_SEED,
+            course_authority.as_ref(),
+            COURSE_ID_SEED,
+            course_id,
+        ],
+        &ID,
+    )
+    .0
+}
+
 #[derive(Accounts)]
 #[instruction(course_id: [u8; 16])]
 pub struct NewCourse<'info> {
@@ -38,9 +51,9 @@ pub struct NewCourse<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// Each batch of any course has unique account id
+/// Each course has unique id
 ///
-/// Course authority creates course account on the first batch of new course.
+/// Course authority creates course account before the first batch of new course.
 #[account]
 pub struct Course {
     /// Course identifier like UUID or ULID

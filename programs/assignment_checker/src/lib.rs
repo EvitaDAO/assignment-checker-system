@@ -1,8 +1,8 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::blake3;
 
-pub const STUDENT_ACCOUNT_SEED: &[u8; 15] = b"student_account";
-pub const COURSE_ACCOUNT_SEED: &[u8; 14] = b"course_account";
+pub const STUDENT_ADDRESS_SEED: &[u8; 15] = b"student_address";
+pub const COURSE_DATA_SEED: &[u8; 11] = b"course_data";
 pub const BATCH_ID_SEED: &[u8; 8] = b"batch_id";
 pub const ASSIGNMENT_ID_SEED: &[u8; 13] = b"assignment_id";
 
@@ -14,8 +14,7 @@ pub mod assignment_checker {
     /// Create an assignment checker
     pub fn create(
         ctx: Context<Create>,
-        batch_id: u16,
-        assignment_id: u16,
+        assignment_id: [u8; 16],
         hash_chain_length: u16,
         to_mint_on_successful_check: u16,
         salt: [u8; 32],
@@ -26,7 +25,6 @@ pub mod assignment_checker {
         ground_truth_hash_chain_tail: [u8; 32],
     ) -> Result<()> {
         let checker_account = &mut ctx.accounts.assignment_checker;
-        checker_account.batch_id = batch_id;
         checker_account.assignment_id = assignment_id;
         checker_account.hash_chain_length = hash_chain_length;
         checker_account.to_mint_on_successful_check = to_mint_on_successful_check;
@@ -50,8 +48,7 @@ pub mod assignment_checker {
     ///     be mitigated by retry with actual hash chain length
     pub fn check(
         ctx: Context<Check>,
-        batch_id: u16,
-        assignment_id: u16,
+        assignment_id: [u8; 16],
         // used to validate the hash chain length
         // that the client expects and deal with concurrent checks
         expected_hash_chain_length: u16,
@@ -85,6 +82,7 @@ pub mod assignment_checker {
             let tail_hash = blake3::hash(&hash_chain_tail_parent);
             if tail_hash == blake3::Hash(checker_account.ground_truth_hash_chain_tail) {
                 // check has passed the first time
+                check_result_account.assignment_id = assignment_id;
                 check_result_account.check_passed = true;
                 check_result_account.passed_first_time = true;
                 // remove tail from the chain
@@ -97,59 +95,85 @@ pub mod assignment_checker {
     }
 }
 
+pub fn assignment_checker_canonical_pda(
+    course_address: Pubkey,
+    assignment_id: &[u8; 16],
+) -> Pubkey {
+    Pubkey::find_program_address(
+        &[
+            COURSE_DATA_SEED,
+            course_address.as_ref(),
+            ASSIGNMENT_ID_SEED,
+            assignment_id,
+        ],
+        &ID,
+    )
+    .0
+}
+
+pub fn check_result_canonical_pda(
+    student_address: Pubkey,
+    course_data: Pubkey,
+    assignment_id: &[u8; 16],
+) -> Pubkey {
+    Pubkey::find_program_address(
+        &[
+            STUDENT_ADDRESS_SEED,
+            student_address.as_ref(),
+            COURSE_DATA_SEED,
+            course_data.as_ref(),
+            ASSIGNMENT_ID_SEED,
+            assignment_id,
+        ],
+        &ID,
+    )
+    .0
+}
+
 // validation struct for Create instruction
 #[derive(Accounts)]
-#[instruction(batch_id: u16, assignment_id: u16, hash_chain_length: u16)]
+#[instruction(assignment_id: [u8; 16], hash_chain_length: u16)]
 pub struct Create<'info> {
     #[account(mut)]
-    pub course_authority: Signer<'info>,
-    pub course_account: Account<'info, course_manager::Course>,
+    pub authority: Signer<'info>,
+    #[account(has_one = authority)]
+    pub course: Account<'info, course_manager::Course>,
     // By default init sets the owner field of the created account to the currently executing program.
     // Anchor will find the canonical bump for the assignment checker PDA.
-    // The PDA is derived from course account, batch and assignment IDs.
-    #[account(init, payer = course_authority, space = 8 + AssignmentChecker::LEN, seeds=[
-        COURSE_ACCOUNT_SEED,
-        course_account.key().as_ref(),
-        BATCH_ID_SEED,
-        batch_id.to_be_bytes().as_ref(),
+    // The PDA is derived from course account and assignment IDs.
+    #[account(init, payer = authority, space = 8 + AssignmentChecker::LEN, seeds=[
+        COURSE_DATA_SEED,
+        course.key().as_ref(),
         ASSIGNMENT_ID_SEED,
-        assignment_id.to_be_bytes().as_ref(),
+        assignment_id.as_ref(),
     ], bump, constraint = hash_chain_length >= 2)]
     pub assignment_checker: Account<'info, AssignmentChecker>,
-    // #[account(
-    //     mint::authority = course_authority,
-    // )]
-    // pub mint_account: Account<'info, Mint>,
     pub system_program: Program<'info, System>,
 }
 
 // validation struct for Create instruction
 #[derive(Accounts)]
-#[instruction(batch_id: u16, assignment_id: u16)]
+#[instruction(assignment_id: [u8; 16])]
 pub struct Check<'info> {
     #[account(mut)]
     pub student: Signer<'info>,
     pub course_account: Account<'info, course_manager::Course>,
 
     #[account(mut, seeds=[
-        COURSE_ACCOUNT_SEED,
+        COURSE_DATA_SEED,
         course_account.key().as_ref(),
-        BATCH_ID_SEED,
-        batch_id.to_be_bytes().as_ref(),
         ASSIGNMENT_ID_SEED,
-        assignment_id.to_be_bytes().as_ref(),
+        assignment_id.as_ref(),
     ], bump = assignment_checker.bump_seed)]
     pub assignment_checker: Account<'info, AssignmentChecker>,
 
     #[account(init_if_needed, payer = student, space = 8 + AssignmentChecker::LEN, seeds=[
-        STUDENT_ACCOUNT_SEED,
+        STUDENT_ADDRESS_SEED,
         student.key().as_ref(),
-        COURSE_ACCOUNT_SEED,
+        COURSE_DATA_SEED,
         course_account.key().as_ref(),
-        BATCH_ID_SEED,
-        batch_id.to_be_bytes().as_ref(),
         ASSIGNMENT_ID_SEED,
-        assignment_id.to_be_bytes().as_ref(),
+        assignment_id.as_ref(),
     ], bump)]
     pub check_result: Account<'info, CheckResult>,
     pub system_program: Program<'info, System>,
@@ -157,10 +181,8 @@ pub struct Check<'info> {
 
 #[account]
 pub struct AssignmentChecker {
-    /// Batch identifies the given course run
-    pub batch_id: u16,
-    /// Assignment ID is unique within a course batch
-    pub assignment_id: u16,
+    /// Assignment ID is unique within a course
+    pub assignment_id: [u8; 16],
     /// Max number of successful checks possible + 1
     ///
     /// at least 1 check per student of the batch + 1 hash
@@ -176,15 +198,13 @@ pub struct AssignmentChecker {
 }
 
 impl AssignmentChecker {
-    pub const LEN: usize = 2 + 2 + 2 + 2 + 32 + 32 + 1;
+    pub const LEN: usize = 16 + 2 + 2 + 32 + 32 + 1;
 }
 
 #[account]
 pub struct CheckResult {
-    /// Batch identifies the given course run
-    pub batch_id: u16,
-    /// Assignment ID is unique within a course batch
-    pub assignment_id: u16,
+    /// Assignment ID is unique within a course
+    pub assignment_id: [u8; 16],
     pub check_passed: bool,
     /// This is true only after first successful check
     pub passed_first_time: bool,
@@ -192,7 +212,7 @@ pub struct CheckResult {
 }
 
 impl CheckResult {
-    pub const LEN: usize = 2 + 2 + 1 + 1;
+    pub const LEN: usize = 16 + 1 + 1 + 1;
 }
 
 #[error_code]

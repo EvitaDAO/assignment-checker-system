@@ -20,3 +20,6 @@ path = "../programs/assignment_checker"
 
 [dev-dependencies.course_manager]
 path = "../programs/course_manager"
+
+[dev-dependencies.course_batch_manager]
+path = "../programs/course_batch_manager"
