@@ -19,3 +19,4 @@ default = []
 anchor-lang = "0.24.0"
 anchor-spl = "0.24"
 course_manager = { "version" = "0.1", path = "../course_manager", features = ["no-entrypoint"] }
+assignment_checker = { "version" = "0.1", path = "../assignment_checker", features = ["no-entrypoint", "cpi"] }

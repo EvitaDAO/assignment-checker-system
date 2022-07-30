@@ -133,16 +133,22 @@ async fn test_assignment_checker(#[future] start_course_batch: Result<Fixture>) 
     assert_eq!(course_batch_account.authority, f.course_authority.pubkey());
 
     // successful check by student_a for the first time
-    let (student_a_hash_tail_parent, check_result) = f
+    // let (student_a_hash_tail_parent, check_result) = f
+    let err = f
         .check_assignment(
             f.student_a.clone(),
+            f.student_a_token_account,
             f.assignment_checker_pda,
             f.course_pda,
             f.assignment_id,
             f.ground_truth_value.as_bytes(),
             None,
         )
-        .await?;
+        .await;
+    if let Err(ref e) = err {
+        println!("err {e:?}");
+    }
+    let (student_a_hash_tail_parent, check_result) = err?;
 
     assert_eq!(check_result.check_passed, true);
     assert_eq!(check_result.passed_first_time, true);
@@ -152,6 +158,7 @@ async fn test_assignment_checker(#[future] start_course_batch: Result<Fixture>) 
     let (_, check_result) = f
         .check_assignment(
             f.student_b.clone(),
+            f.student_b_token_account,
             f.assignment_checker_pda,
             f.course_pda,
             f.assignment_id,
@@ -168,6 +175,7 @@ async fn test_assignment_checker(#[future] start_course_batch: Result<Fixture>) 
     let (_, check_result) = f
         .check_assignment(
             f.student_a.clone(),
+            f.student_a_token_account,
             f.assignment_checker_pda,
             f.course_pda,
             f.assignment_id,
@@ -268,9 +276,9 @@ impl Fixture {
     async fn get_checker_account(
         &self,
         checker_pda: Pubkey,
-    ) -> assignment_checker::AssignmentChecker {
+    ) -> assignment_checker::AssignmentCheckerState {
         self.client
-            .account_data::<assignment_checker::AssignmentChecker>(checker_pda)
+            .account_data::<assignment_checker::AssignmentCheckerState>(checker_pda)
             .await?
     }
 
@@ -289,13 +297,14 @@ impl Fixture {
     async fn check_assignment(
         &self,
         student_keypair: Keypair,
+        student_token_address: Pubkey,
         checker_data_address: Pubkey,
         course_data_address: Pubkey,
         assignment_id: [u8; 16],
         value_to_check: &[u8],
         // to use custom hash instead of hasing value_to_check
         use_custom_hash_tail_parent: Option<[u8; 32]>,
-        // the first element the hash used for check
+        // (hash used for check, check_result)
     ) -> ([u8; 32], assignment_checker::CheckResult) {
         let assignment_checker = self.get_checker_account(checker_data_address).await?;
         let hash_chain_length = assignment_checker.hash_chain_length;
@@ -307,22 +316,28 @@ impl Fixture {
             )
         });
 
-        let check_result_address = assignment_checker::check_result_canonical_pda(
+        let check_result_address = course_batch_manager::check_result_canonical_pda(
             student_keypair.pubkey(),
             course_data_address,
             &assignment_id,
         );
 
-        assignment_checker_instruction::check(
+        course_batch_manager_instruction::check_assignment(
             &self.client,
             assignment_id,
             hash_chain_length,
             hash_chain_tail_parent,
             student_keypair.pubkey(),
+            self.course_authority.pubkey(),
             course_data_address,
             checker_data_address,
             check_result_address,
+            self.course_batch_mint_pda,
+            student_token_address,
             system_program::ID,
+            token::ID,
+            assignment_checker::ID,
+            course_batch_manager::ID,
             [student_keypair],
         )
         .await?;

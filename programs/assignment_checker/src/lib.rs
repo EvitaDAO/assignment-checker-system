@@ -141,13 +141,13 @@ pub struct Create<'info> {
     // By default init sets the owner field of the created account to the currently executing program.
     // Anchor will find the canonical bump for the assignment checker PDA.
     // The PDA is derived from course account and assignment IDs.
-    #[account(init, payer = authority, space = 8 + AssignmentChecker::LEN, seeds=[
+    #[account(init, payer = authority, space = 8 + AssignmentCheckerState::LEN, seeds=[
         COURSE_DATA_SEED,
         course.key().as_ref(),
         ASSIGNMENT_ID_SEED,
         assignment_id.as_ref(),
     ], bump, constraint = hash_chain_length >= 2)]
-    pub assignment_checker: Account<'info, AssignmentChecker>,
+    pub assignment_checker: Account<'info, AssignmentCheckerState>,
     pub system_program: Program<'info, System>,
 }
 
@@ -157,30 +157,31 @@ pub struct Create<'info> {
 pub struct Check<'info> {
     #[account(mut)]
     pub student: Signer<'info>,
-    pub course_account: Account<'info, course_manager::Course>,
+    #[account(owner = course_manager::ID)]
+    pub course: Account<'info, course_manager::Course>,
 
     #[account(mut, seeds=[
         COURSE_DATA_SEED,
-        course_account.key().as_ref(),
+        course.key().as_ref(),
         ASSIGNMENT_ID_SEED,
         assignment_id.as_ref(),
     ], bump = assignment_checker.bump_seed)]
-    pub assignment_checker: Account<'info, AssignmentChecker>,
+    pub assignment_checker: Account<'info, AssignmentCheckerState>,
 
-    #[account(init_if_needed, payer = student, space = 8 + AssignmentChecker::LEN, seeds=[
+    #[account(init_if_needed, payer = student, space = 8 + AssignmentCheckerState::LEN, seeds=[
         STUDENT_ADDRESS_SEED,
         student.key().as_ref(),
         COURSE_DATA_SEED,
-        course_account.key().as_ref(),
+        course.key().as_ref(),
         ASSIGNMENT_ID_SEED,
         assignment_id.as_ref(),
     ], bump)]
     pub check_result: Account<'info, CheckResult>,
     pub system_program: Program<'info, System>,
-}
+
 
 #[account]
-pub struct AssignmentChecker {
+pub struct AssignmentCheckerState {
     /// Assignment ID is unique within a course
     pub assignment_id: [u8; 16],
     /// Max number of successful checks possible + 1
@@ -197,7 +198,7 @@ pub struct AssignmentChecker {
     pub bump_seed: u8,
 }
 
-impl AssignmentChecker {
+impl AssignmentCheckerState {
     pub const LEN: usize = 16 + 2 + 2 + 32 + 32 + 1;
 }
 
