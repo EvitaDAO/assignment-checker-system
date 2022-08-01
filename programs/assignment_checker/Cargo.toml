@@ -15,9 +15,6 @@ no-log-ix-name = []
 cpi = ["no-entrypoint"]
 default = []
 
-[profile.release]
-overflow-checks = true
-
 [dependencies]
 anchor-lang = "0.24"
 course_manager = { "version" = "0.1", path = "../course_manager", features = ["no-entrypoint"] }
