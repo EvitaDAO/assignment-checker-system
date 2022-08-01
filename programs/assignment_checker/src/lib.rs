@@ -1,19 +1,18 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::blake3;
 
-pub const STUDENT_ADDRESS_SEED: &[u8; 15] = b"student_address";
-pub const COURSE_DATA_SEED: &[u8; 11] = b"course_data";
-pub const BATCH_ID_SEED: &[u8; 8] = b"batch_id";
-pub const ASSIGNMENT_ID_SEED: &[u8; 13] = b"assignment_id";
-
 declare_id!("Po1RaS8BEDbNcn5oXsFryAeQ6Wn8fvmE111DJaKCgPC");
+
+pub const COURSE_DATA_SEED: &[u8; 11] = b"course_data";
+pub const ASSIGNMENT_ID_SEED: &[u8; 13] = b"assignment_id";
+pub const STUDENT_ADDRESS_SEED: &[u8; 15] = b"student_address";
+// Owner of AssignmentCheckerState and CheckResult accounts
 #[program]
 pub mod assignment_checker {
     use super::*;
 
-    /// Create an assignment checker
-    pub fn create(
-        ctx: Context<Create>,
+    pub fn init(
+        ctx: Context<Init>,
         assignment_id: [u8; 16],
         hash_chain_length: u16,
         to_mint_on_successful_check: u16,
@@ -29,11 +28,24 @@ pub mod assignment_checker {
         checker_account.hash_chain_length = hash_chain_length;
         checker_account.to_mint_on_successful_check = to_mint_on_successful_check;
         checker_account.salt = salt;
-        checker_account.ground_truth_hash_chain_tail = ground_truth_hash_chain_tail;
+        *checker_account.ground_truth_hash_chain_tail() = ground_truth_hash_chain_tail;
         checker_account.bump_seed = *ctx
             .bumps
             .get("assignment_checker")
             .expect("assignment_checker pda is present");
+        msg!("init assignment checker account {}", checker_account.key(),);
+        Ok(())
+    }
+
+    /// Init check result created by the result_processor_program
+    pub fn init_check_result(ctx: Context<InitCheckResult>, assignment_id: [u8; 16]) -> Result<()> {
+        let check_result = &mut ctx.accounts.check_result;
+        check_result.assignment_id = assignment_id;
+        check_result.bump_seed = *ctx
+            .bumps
+            .get("check_result")
+            .expect("check_result pda is present");
+        msg!("init check result account {}", check_result.key());
         Ok(())
     }
 
@@ -48,7 +60,6 @@ pub mod assignment_checker {
     ///     be mitigated by retry with actual hash chain length
     pub fn check(
         ctx: Context<Check>,
-        assignment_id: [u8; 16],
         // used to validate the hash chain length
         // that the client expects and deal with concurrent checks
         expected_hash_chain_length: u16,
@@ -62,12 +73,6 @@ pub mod assignment_checker {
             check_result_account.passed_first_time = false;
         } else {
             // this check hasn't passed yet
-            // save bump seed for future validations
-            check_result_account.bump_seed = *ctx
-                .bumps
-                .get("check_result")
-                .expect("check_result pda is present");
-
             let checker_account = &mut ctx.accounts.assignment_checker;
             if checker_account.hash_chain_length == 0 {
                 // checker has used full hash chain
@@ -82,103 +87,102 @@ pub mod assignment_checker {
             let tail_hash = blake3::hash(&hash_chain_tail_parent);
             if tail_hash == blake3::Hash(checker_account.ground_truth_hash_chain_tail) {
                 // check has passed the first time
-                check_result_account.assignment_id = assignment_id;
                 check_result_account.check_passed = true;
                 check_result_account.passed_first_time = true;
                 // remove tail from the chain
                 checker_account.hash_chain_length -= 1;
                 checker_account.ground_truth_hash_chain_tail = hash_chain_tail_parent;
+                msg!("check is passed");
             }
-            // else: check_result is zero initialized => check_passed is false
+            // else: keep check_passed and passed_first_time as false
         }
         Ok(())
     }
 }
 
-pub fn assignment_checker_canonical_pda(
-    course_address: Pubkey,
-    assignment_id: &[u8; 16],
-) -> Pubkey {
-    Pubkey::find_program_address(
-        &[
-            COURSE_DATA_SEED,
-            course_address.as_ref(),
-            ASSIGNMENT_ID_SEED,
-            assignment_id,
-        ],
-        &ID,
-    )
-    .0
-}
-
-pub fn check_result_canonical_pda(
-    student_address: Pubkey,
-    course_data: Pubkey,
-    assignment_id: &[u8; 16],
-) -> Pubkey {
-    Pubkey::find_program_address(
-        &[
-            STUDENT_ADDRESS_SEED,
-            student_address.as_ref(),
-            COURSE_DATA_SEED,
-            course_data.as_ref(),
-            ASSIGNMENT_ID_SEED,
-            assignment_id,
-        ],
-        &ID,
-    )
-    .0
-}
-
-// validation struct for Create instruction
 #[derive(Accounts)]
 #[instruction(assignment_id: [u8; 16], hash_chain_length: u16)]
-pub struct Create<'info> {
+pub struct Init<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
     #[account(has_one = authority)]
     pub course: Account<'info, course_manager::Course>,
-    // By default init sets the owner field of the created account to the currently executing program.
-    // Anchor will find the canonical bump for the assignment checker PDA.
-    // The PDA is derived from course account and assignment IDs.
-    #[account(init, payer = authority, space = 8 + AssignmentCheckerState::LEN, seeds=[
+
+    #[account(
+        zero,
+        signer,
+        seeds=[
         COURSE_DATA_SEED,
         course.key().as_ref(),
         ASSIGNMENT_ID_SEED,
         assignment_id.as_ref(),
-    ], bump, constraint = hash_chain_length >= 2)]
+    ],
+    seeds::program = result_processor_program, bump, constraint = hash_chain_length >= 2)]
     pub assignment_checker: Account<'info, AssignmentCheckerState>,
-    pub system_program: Program<'info, System>,
+    #[account(executable)]
+    pub result_processor_program: AccountInfo<'info>,
 }
 
-// validation struct for Create instruction
 #[derive(Accounts)]
 #[instruction(assignment_id: [u8; 16])]
-pub struct Check<'info> {
+pub struct InitCheckResult<'info> {
     #[account(mut)]
     pub student: Signer<'info>,
-    #[account(owner = course_manager::ID)]
     pub course: Account<'info, course_manager::Course>,
 
-    #[account(mut, seeds=[
-        COURSE_DATA_SEED,
-        course.key().as_ref(),
-        ASSIGNMENT_ID_SEED,
-        assignment_id.as_ref(),
-    ], bump = assignment_checker.bump_seed)]
-    pub assignment_checker: Account<'info, AssignmentCheckerState>,
-
-    #[account(init_if_needed, payer = student, space = 8 + AssignmentCheckerState::LEN, seeds=[
+    #[account(zero,
+        signer,
+        seeds=[
         STUDENT_ADDRESS_SEED,
         student.key().as_ref(),
         COURSE_DATA_SEED,
         course.key().as_ref(),
         ASSIGNMENT_ID_SEED,
         assignment_id.as_ref(),
-    ], bump)]
+    ],
+    seeds::program = result_processor_program,
+    bump)]
     pub check_result: Account<'info, CheckResult>,
-    pub system_program: Program<'info, System>,
+    #[account(executable)]
+    pub result_processor_program: AccountInfo<'info>,
+}
 
+#[derive(Accounts)]
+pub struct Check<'info> {
+    #[account(mut)]
+    pub student: Signer<'info>,
+    pub course: Account<'info, course_manager::Course>,
+
+    #[account(mut,
+        signer,
+        seeds=[
+        COURSE_DATA_SEED,
+        course.key().as_ref(),
+        ASSIGNMENT_ID_SEED,
+        assignment_checker.assignment_id.as_ref(),
+    ], seeds::program = result_processor_program, bump=assignment_checker.bump_seed,
+    constraint = assignment_checker.assignment_id == check_result.assignment_id
+    )]
+    pub assignment_checker: Account<'info, AssignmentCheckerState>,
+
+    #[account(mut,
+        signer,
+        seeds=[
+        STUDENT_ADDRESS_SEED,
+        student.key().as_ref(),
+        COURSE_DATA_SEED,
+        course.key().as_ref(),
+        ASSIGNMENT_ID_SEED,
+        check_result.assignment_id.as_ref(),
+    ], seeds::program = result_processor_program, bump=check_result.bump_seed,
+    )]
+    pub check_result: Account<'info, CheckResult>,
+    // result_processor_program is expected to be called by student
+    // and sign for mutable PDAs
+    // student cannot call check directly
+    #[account(executable)]
+    pub result_processor_program: AccountInfo<'info>,
+}
 
 #[account]
 pub struct AssignmentCheckerState {
@@ -200,6 +204,10 @@ pub struct AssignmentCheckerState {
 
 impl AssignmentCheckerState {
     pub const LEN: usize = 16 + 2 + 2 + 32 + 32 + 1;
+
+    pub fn ground_truth_hash_chain_tail(&mut self) -> &mut [u8; 32] {
+        &mut self.ground_truth_hash_chain_tail
+    }
 }
 
 #[account]

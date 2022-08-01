@@ -3,7 +3,6 @@ use anchor_lang::system_program;
 use anchor_spl::associated_token::{self, get_associated_token_address};
 use anchor_spl::token;
 use fehler::throws;
-use program_client::assignment_checker_instruction;
 use program_client::course_batch_manager_instruction;
 use program_client::course_manager_instruction;
 use trdelnik_client::{anyhow::Result, *};
@@ -101,10 +100,10 @@ async fn start_course_batch() -> Fixture {
     );
 
     f.assignment_checker_pda =
-        assignment_checker::assignment_checker_canonical_pda(f.course_pda, &f.assignment_id);
+        course_batch_manager::assignment_checker_canonical_pda(f.course_pda, &f.assignment_id);
 
     // create assignment checker
-    assignment_checker_instruction::create(
+    course_batch_manager_instruction::create_assignment_checker(
         &f.client,
         f.assignment_id,
         f.hash_chain_length,
@@ -114,8 +113,44 @@ async fn start_course_batch() -> Fixture {
         f.course_authority.pubkey(),
         f.course_pda,
         f.assignment_checker_pda,
+        assignment_checker::ID,
+        course_batch_manager::ID,
         system_program::ID,
         [f.course_authority.clone()],
+    )
+    .await?;
+
+    // init check result accounts for students A and B
+    course_batch_manager_instruction::create_check_result(
+        &f.client,
+        f.assignment_id,
+        f.student_a.pubkey(),
+        f.course_pda,
+        course_batch_manager::check_result_canonical_pda(
+            f.student_a.pubkey(),
+            f.course_pda,
+            &f.assignment_id,
+        ),
+        assignment_checker::ID,
+        course_batch_manager::ID,
+        system_program::ID,
+        [f.student_a.clone()],
+    )
+    .await?;
+    course_batch_manager_instruction::create_check_result(
+        &f.client,
+        f.assignment_id,
+        f.student_b.pubkey(),
+        f.course_pda,
+        course_batch_manager::check_result_canonical_pda(
+            f.student_b.pubkey(),
+            f.course_pda,
+            &f.assignment_id,
+        ),
+        assignment_checker::ID,
+        course_batch_manager::ID,
+        system_program::ID,
+        [f.student_b.clone()],
     )
     .await?;
 
@@ -124,7 +159,7 @@ async fn start_course_batch() -> Fixture {
 
 #[trdelnik_test]
 async fn test_assignment_checker(#[future] start_course_batch: Result<Fixture>) {
-    let f = start_course_batch.await?;
+    let mut f = start_course_batch.await?;
 
     // saved authority in course and course batch data accounts
     let course_account = f.get_course_account().await?;
@@ -132,26 +167,33 @@ async fn test_assignment_checker(#[future] start_course_batch: Result<Fixture>) 
     let course_batch_account = f.get_course_batch_account().await?;
     assert_eq!(course_batch_account.authority, f.course_authority.pubkey());
 
+    // empty balance for student_a
+    let balance_a = f
+        .client
+        .get_token_balance(f.student_a_token_account)
+        .await?;
+    assert_eq!(balance_a.amount.as_str(), "0");
+
     // successful check by student_a for the first time
-    // let (student_a_hash_tail_parent, check_result) = f
-    let err = f
+    let (student_a_hash_tail_parent, check_result) = f
         .check_assignment(
             f.student_a.clone(),
             f.student_a_token_account,
             f.assignment_checker_pda,
             f.course_pda,
-            f.assignment_id,
+            f.course_batch_pda,
             f.ground_truth_value.as_bytes(),
             None,
         )
-        .await;
-    if let Err(ref e) = err {
-        println!("err {e:?}");
-    }
-    let (student_a_hash_tail_parent, check_result) = err?;
+        .await?;
 
     assert_eq!(check_result.check_passed, true);
     assert_eq!(check_result.passed_first_time, true);
+    let balance_a = f
+        .client
+        .get_token_balance(f.student_a_token_account)
+        .await?;
+    assert_eq!(balance_a.amount.as_str(), "100");
 
     // student_b tries to send the same hash value as student_a and fails the check
     // the chain became shorter and needs new hash
@@ -161,7 +203,7 @@ async fn test_assignment_checker(#[future] start_course_batch: Result<Fixture>) 
             f.student_b_token_account,
             f.assignment_checker_pda,
             f.course_pda,
-            f.assignment_id,
+            f.course_batch_pda,
             &[],
             Some(student_a_hash_tail_parent),
         )
@@ -169,6 +211,12 @@ async fn test_assignment_checker(#[future] start_course_batch: Result<Fixture>) 
 
     assert_eq!(check_result.check_passed, false);
     assert_eq!(check_result.passed_first_time, false);
+    // empty balance for student_b
+    let balance_b = f
+        .client
+        .get_token_balance(f.student_b_token_account)
+        .await?;
+    assert_eq!(balance_b.amount.as_str(), "0");
 
     // student_a runs the check the second time
     // the second check marked as not passed the first time
@@ -178,7 +226,7 @@ async fn test_assignment_checker(#[future] start_course_batch: Result<Fixture>) 
             f.student_a_token_account,
             f.assignment_checker_pda,
             f.course_pda,
-            f.assignment_id,
+            f.course_batch_pda,
             f.ground_truth_value.as_bytes(),
             None,
         )
@@ -186,6 +234,12 @@ async fn test_assignment_checker(#[future] start_course_batch: Result<Fixture>) 
 
     assert_eq!(check_result.check_passed, true);
     assert_eq!(check_result.passed_first_time, false);
+    // balance is not changed
+    let balance_a = f
+        .client
+        .get_token_balance(f.student_a_token_account)
+        .await?;
+    assert_eq!(balance_a.amount.as_str(), "100");
 }
 
 /// Input keypairs / pubkeys / programs and data to configure tests
@@ -278,7 +332,7 @@ impl Fixture {
         checker_pda: Pubkey,
     ) -> assignment_checker::AssignmentCheckerState {
         self.client
-            .account_data::<assignment_checker::AssignmentCheckerState>(checker_pda)
+            .account_data::<course_batch_manager::AssignmentCheckerState>(checker_pda)
             .await?
     }
 
@@ -288,7 +342,7 @@ impl Fixture {
         check_result_pda: Pubkey,
     ) -> assignment_checker::CheckResult {
         self.client
-            .account_data::<assignment_checker::CheckResult>(check_result_pda)
+            .account_data::<course_batch_manager::CheckResult>(check_result_pda)
             .await?
     }
 
@@ -300,12 +354,12 @@ impl Fixture {
         student_token_address: Pubkey,
         checker_data_address: Pubkey,
         course_data_address: Pubkey,
-        assignment_id: [u8; 16],
+        course_batch_address: Pubkey,
         value_to_check: &[u8],
         // to use custom hash instead of hasing value_to_check
         use_custom_hash_tail_parent: Option<[u8; 32]>,
         // (hash used for check, check_result)
-    ) -> ([u8; 32], assignment_checker::CheckResult) {
+    ) -> ([u8; 32], course_batch_manager::CheckResult) {
         let assignment_checker = self.get_checker_account(checker_data_address).await?;
         let hash_chain_length = assignment_checker.hash_chain_length;
         let hash_chain_tail_parent = use_custom_hash_tail_parent.unwrap_or_else(|| {
@@ -319,17 +373,16 @@ impl Fixture {
         let check_result_address = course_batch_manager::check_result_canonical_pda(
             student_keypair.pubkey(),
             course_data_address,
-            &assignment_id,
+            &assignment_checker.assignment_id,
         );
 
         course_batch_manager_instruction::check_assignment(
             &self.client,
-            assignment_id,
             hash_chain_length,
             hash_chain_tail_parent,
             student_keypair.pubkey(),
-            self.course_authority.pubkey(),
             course_data_address,
+            course_batch_address,
             checker_data_address,
             check_result_address,
             self.course_batch_mint_pda,

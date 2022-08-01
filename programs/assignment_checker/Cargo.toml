@@ -19,5 +19,5 @@ default = []
 overflow-checks = true
 
 [dependencies]
-anchor-lang = { version = "0.24", features = ["init-if-needed"] }
+anchor-lang = "0.24"
 course_manager = { "version" = "0.1", path = "../course_manager", features = ["no-entrypoint"] }
