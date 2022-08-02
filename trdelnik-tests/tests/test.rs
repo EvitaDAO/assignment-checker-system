@@ -157,7 +157,7 @@ async fn start_course_batch() -> Fixture {
     f
 }
 
-/// Test if student gets minted tokens once on the first passed assignment check
+/// Test if student gets minted tokens once - on the first passed assignment check
 #[trdelnik_test]
 async fn test_check_assignment(#[future] start_course_batch: Result<Fixture>) {
     let mut f = start_course_batch.await?;
